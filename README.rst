@@ -12,7 +12,7 @@ What it does
 The T4 template does a few things:
 
 - generates namespace for proxy
-- generates class proxy, adding `virtual` where possible 
+- generates class proxy, adding ``virtual`` where possible 
 - generates proxy interface and implements all wrapped class’s top level 
   interfaces explicitly
 - generates simple class factory and its interface
@@ -27,12 +27,12 @@ Here is a list of what's supported (not mentioned is not tested):
 - events and event accessors
 - top level explicit interfaces
 - arrays
-- `params`, `out` and `ref` arguments
+- ``params``, ``out`` and ``ref`` arguments
 - generics with exact types (no pure generics)
 - nested types
 
-Note: there is no usings or pretty alignment - I don't care as long as 
-machine can read it (use _Ctrl+K-D_ if you really want to work with the code).
+*Note*: there is no usings or pretty alignment - I don't care as long as 
+machine can read it (use *Ctrl+K-D* if you really want to work with the code).
 
 How to use it
 =============
@@ -52,4 +52,4 @@ Testing
 =======
 
 Template is written and debugged in Visual Studio 2013, tested with 
-`String`, `SortedDictionary<T,T>`, `SQLCommand` and a few other classes.
+``String``, ``SortedDictionary<T,T>`, ``SQLCommand`` and a few other classes.

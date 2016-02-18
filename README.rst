@@ -14,7 +14,7 @@ The T4 template does a few things:
 - generates namespace for proxy
 - generates class proxy, adding `virtual` where possible 
 - generates proxy interface and implements all wrapped class’s top level 
-interfaces explicitly
+  interfaces explicitly
 - generates simple class factory and its interface
 
 What is supported
@@ -31,7 +31,7 @@ Here is a list of what's supported (not mentioned is not tested):
 - generics with exact types (no pure generics)
 - nested types
 
-_Note_: there is no usings or pretty alignment - I don't care as long as 
+Note: there is no usings or pretty alignment - I don't care as long as 
 machine can read it (use _Ctrl+K-D_ if you really want to work with the code).
 
 How to use it
@@ -40,13 +40,13 @@ How to use it
 Finally, this is the best known way to use the template:
 
 - Rename template file as you feel necessary. Better use target proxy class 
-name for this.
+  name for this.
 - Set target type and namespace in *NAMES* section of the template.
 - Make sure type assembly is referenced by _assembly_ directive.
 - Optionally (at your own risk), adjust metadata selectors in *SELECTORS* 
-section of the template.
+  section of the template.
 - To tweak template, scroll down to the bottom. This is REAL stuff, so don't 
-ask why it's written that way. 
+  ask why it's written that way. 
 
 Testing
 =======

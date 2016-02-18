@@ -1,0 +1,323 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ output extension=".cs" #>
+<#@ assembly name="System.Core" #>
+<#@ assembly name="System.Data" #>
+<#@ assembly name="System" #>
+<#@ import namespace="System" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Text.RegularExpressions" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.Reflection" #>
+<#
+/* ----------------------------------- NAMES ----------------------------------- */
+
+var targetType = typeof(System.Data.SqlClient.SqlCommand);
+var targetProxyNamespace = (targetType.Namespace + ".Proxies");
+var targetProxySuffix = "Proxy";
+var wrappedInstance = "_inner";
+
+/* --------------------------------- SELECTORS --------------------------------- */
+
+var ctorInfos = targetType.GetConstructors(BindingFlags.Instance|BindingFlags.Public|BindingFlags.DeclaredOnly);
+var eventInfos = targetType.GetEvents(BindingFlags.Instance|BindingFlags.Public|BindingFlags.DeclaredOnly);
+var propertyInfos = targetType.GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.DeclaredOnly);
+var methodInfos = targetType.GetMethods(BindingFlags.Instance|BindingFlags.Public|BindingFlags.DeclaredOnly).Where(m => !m.IsSpecialName).ToArray();
+var interfaces = targetType.GetInterfaces();
+var ifaceEvents = new Func<Type, EventInfo[]>(i => i.GetEvents(BindingFlags.Instance|BindingFlags.Public|BindingFlags.DeclaredOnly));
+var ifaceProperties = new Func<Type, PropertyInfo[]>(i => i.GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.DeclaredOnly));
+var ifaceMethods = new Func<Type, MethodInfo[]>(i => i.GetMethods(BindingFlags.Instance|BindingFlags.Public|BindingFlags.DeclaredOnly).Where(m => !m.IsSpecialName).ToArray());
+
+/* ---------------------------------- HELPERS ---------------------------------- */
+
+var isVoid = new Func<Type, bool>(t => Object.ReferenceEquals(t, typeof(void)));
+var canonicalNamePattern = new Regex(@"^([^`]+)`?.*$", RegexOptions.Compiled|RegexOptions.IgnoreCase);
+var getCanonicalName = new Func<Type, string>(t => canonicalNamePattern.Match(t.FullName).Groups[1].Value);
+var proxyTypeShortName = getCanonicalName(targetType).Split('.').Last() + targetProxySuffix;
+
+/* ---------------------------------- WRITERS ----------------------------------- */
+
+Func<Type, string> writeGeneric = null;
+Func<Type, string> writeArray = null;
+Func<Type, string> writeType = null;
+
+writeGeneric = new Func<Type, string>(t => {
+	var typeRep = String.Empty;
+	var stack = new Stack<Type>(new[]{t});
+	var scopes = new Stack<Type>();	
+	var spans = new Stack<int>();	
+		
+	while (stack.Count > 0)
+	{
+		var cur = stack.Pop();
+
+		if (cur.IsGenericType)
+		{
+			scopes.Push(cur);
+			spans.Push(cur.GenericTypeArguments.Length);
+			cur.GenericTypeArguments.Reverse().ToList().ForEach(x => stack.Push(x));
+
+			typeRep += getCanonicalName(cur) + "<";
+		}
+		else
+		{
+			typeRep += writeType(cur);
+		}		
+
+		while (scopes.Count > 0)
+		{
+			var scope = scopes.Pop();
+			var span = spans.Pop();
+
+			if (span-- == 0)
+			{
+				typeRep += ">";
+			}
+			else
+			{
+				scopes.Push(scope);
+				spans.Push(span);
+
+				typeRep += (span < scope.GenericTypeArguments.Length - 1 ? ", " : String.Empty);
+				break;
+			}
+		}
+	}		
+	return typeRep; 
+});
+
+writeArray = new Func<Type, string>(t => {
+	var type = t;
+	var depth = 1;
+	while ((type = type.GetElementType()) != null && type.IsArray) depth++;
+			
+	var typeRep = writeType(type);
+
+	while (depth-- > 0) typeRep += "[]";
+	return typeRep;
+});
+
+writeType = new Func<Type, string>(t => {
+	var typeRep = String.Empty;
+
+	if (isVoid(t)) 
+		typeRep = "void";
+			
+	else if (t.IsArray)
+		typeRep = writeArray(t);
+
+	else if (t.IsGenericType) 
+		typeRep = writeGeneric(t);			
+
+	else
+		typeRep = t.FullName;
+
+	if (t.IsNested)
+		typeRep += "." + t.Name;
+
+	return typeRep;
+});
+
+var writeUnsafe = new Func<object, string>(o => {			
+	var usafe = false;
+	if (o is ConstructorInfo)	
+		usafe = ((ConstructorInfo)o).GetParameters().Any(p => p.ParameterType.IsPointer);	
+
+	else if (o is PropertyInfo)
+		usafe = ((PropertyInfo)o).PropertyType.IsPointer;
+		
+	else if (o is MethodInfo)
+		usafe = ((MethodInfo)o).GetParameters().Any(p => p.ParameterType.IsPointer) ||
+				((MethodInfo)o).ReturnType.IsPointer;	
+	
+	return usafe ? "unsafe " : String.Empty;
+});
+
+var writeMethod = new Func<MethodInfo, string, string>((m, source) => {		
+	var returns = (!isVoid(m.ReturnParameter.ParameterType) ? "return " : String.Empty);	
+	var methodRep = String.Format("{0}{1}.{2}", returns, source, m.Name);
+	return methodRep;
+});
+
+var getArgPrefix = new Func<ParameterInfo, string>(p => { 
+    if (p.ParameterType.IsByRef && p.IsOut)
+		return "out ";
+	if (p.ParameterType.IsByRef)
+		return "ref ";
+	 return String.Empty;
+});
+
+var writeParamType = new Func<ParameterInfo, string>(p => {		
+	var prefix = String.Empty;	
+	var type = p.ParameterType;
+	var isParams = p.GetCustomAttributes(typeof(ParamArrayAttribute), false).Length > 0;
+	
+	if (isParams)
+	{
+		prefix = "params ";
+	}
+	else if ((prefix = getArgPrefix(p)).Length > 0)
+	{
+		type = type.GetElementType();
+	}
+
+	var parRep = prefix + writeType(type);
+	return parRep;
+});
+
+var writeParamName = new Func<ParameterInfo, string>(p => {
+	var prefix = getArgPrefix(p);
+	var argRep = prefix + p.Name;
+	return argRep;
+});
+#>
+
+/* ---------------------------------------------------------------------------- *
+ *		The code is generated by 'T4Wrap' C# proxy generator T4 template		*
+ * ---------------------------------------------------------------------------- */
+
+namespace <#=targetProxyNamespace#>
+{
+	public class <#=proxyTypeShortName#> : <#=String.Join(", ", new []{"I" + proxyTypeShortName}.Union(interfaces.Select(i => writeType(i))))#>
+	{
+		protected <#=writeType(targetType)#> <#=wrappedInstance#>;
+
+		#region Constructors
+		<#foreach(var ctorInfo in ctorInfos) {#>
+		<#var args = ctorInfo.GetParameters();#>
+			public <#=writeUnsafe(ctorInfo)#><#=proxyTypeShortName#>(<#=String.Join(", ", 
+				args.Select(a => String.Format("{0} {1}", writeType(a.ParameterType), a.Name)))#>)
+			{
+				<#=wrappedInstance#> = new <#=writeType(targetType)#>(<#=String.Join(", ", args.Select(a => writeParamName(a)))#>);
+				<#foreach(var eventInfo in eventInfos) {#>
+				<#var eventArgs = String.Join(", ", eventInfo.EventHandlerType.GetMethod("Invoke").GetParameters().Select(a => a.Name));#>
+				<#=wrappedInstance#>.<#=eventInfo.Name#> += (<#=eventArgs#>) => { if (this.<#=eventInfo.Name#> != null) this.<#=eventInfo.Name#>(<#=eventArgs#>); };
+				<#}#>
+			}
+		<#}#>
+		#endregion
+
+		#region Events
+		<#foreach(var eventInfo in eventInfos) {#>
+			public virtual event <#=writeType(eventInfo.EventHandlerType)#> <#=eventInfo.Name#>;
+		<#}#>
+		#endregion
+
+		#region Properties
+		<#foreach(var propInfo in propertyInfos) {#>
+		<#var indexers = propInfo.GetIndexParameters();#>
+		<#if (indexers.Length > 0) {#>
+			<#var indexes = String.Join(", ", indexers.Select(i => i.Name));#>
+			public virtual <#=writeUnsafe(propInfo)#><#=writeType(propInfo.PropertyType)#> <#=String.Format("this[{0}]", 
+				String.Join(", ", indexers.Select(i => String.Format("{0} {1}", writeType(i.ParameterType), i.Name))))#>
+			{				
+				<#if (propInfo.CanRead) {#>get { return <#=wrappedInstance#>[<#=indexes#>]; }<#}#>
+				<#if (propInfo.CanWrite) {#>set { <#=wrappedInstance#>[<#=indexes#>] = value; }<#}#>
+			}
+			<#} else {#>
+			public virtual <#=writeUnsafe(propInfo)#><#=writeType(propInfo.PropertyType)#> <#=propInfo.Name#>
+			{
+				<#if (propInfo.CanRead) {#>get { return <#=wrappedInstance#>.<#=propInfo.Name#>; }<#}#>
+				<#if (propInfo.CanWrite) {#>set { <#=wrappedInstance#>.<#=propInfo.Name#> = value; }<#}#>
+			}
+			<#}#>
+		<#}#>
+		#endregion
+
+		#region Methods
+		<#foreach(var methodInfo in methodInfos) {#>
+		<#var args = methodInfo.GetParameters();#>
+			public virtual <#=writeUnsafe(methodInfo)#><#=writeType(methodInfo.ReturnParameter.ParameterType)#> <#=methodInfo.Name#>(<#=String.Join(", ",
+				args.Select(a => String.Format("{0} {1}", writeParamType(a), a.Name)))#>)
+			{
+				<#=writeMethod(methodInfo, wrappedInstance)#>(<#=String.Join(", ", args.Select(a => writeParamName(a)))#>);
+			}
+		<#}#>
+		#endregion
+
+		<#foreach (var iface in interfaces) {#>
+		<#var iName = writeType(iface);#>
+		#region <#=iName#> Members
+		<#foreach(var eventInfo in ifaceEvents(iface)) {#>
+			event <#=writeType(eventInfo.EventHandlerType)#> <#=iName#>.<#=eventInfo.Name#>
+			{
+				add { ((<#=iName#>)<#=wrappedInstance#>).<#=eventInfo.Name#> += value; }
+				remove { ((<#=iName#>)<#=wrappedInstance#>).<#=eventInfo.Name#> -= value; }
+			}
+		<#}#>
+		<#foreach(var propInfo in ifaceProperties(iface)) {#>
+		<#var indexers = propInfo.GetIndexParameters();#>
+		<#if (indexers.Length > 0) {#>			
+			<#=writeUnsafe(propInfo)#><#=writeType(propInfo.PropertyType)#> <#=iName#>.<#=String.Format("this[{0}]", 
+				String.Join(", ", indexers.Select(i => String.Format("{0} {1}", writeType(i.ParameterType), i.Name))))#>
+			{
+				<#var indexes = String.Join(", ", indexers.Select(i => i.Name));#>
+				<#if (propInfo.CanRead) {#>get { return ((<#=iName#>)<#=wrappedInstance#>)[<#=indexes#>]; }<#}#>
+				<#if (propInfo.CanWrite) {#>set { ((<#=iName#>)<#=wrappedInstance#>)[<#=indexes#>] = value; }<#}#>
+			}
+			<#} else {#>
+			<#=writeUnsafe(propInfo)#><#=writeType(propInfo.PropertyType)#> <#=iName#>.<#=propInfo.Name#>
+			{
+				<#if (propInfo.CanRead) {#>get { return ((<#=iName#>)<#=wrappedInstance#>).<#=propInfo.Name#>; }<#}#>
+				<#if (propInfo.CanWrite) {#>set { ((<#=iName#>)<#=wrappedInstance#>).<#=propInfo.Name#> = value; }<#}#>
+			}
+			<#}#>
+		<#}#>
+		<#foreach(var methodInfo in ifaceMethods(iface)) {#>
+		<#var args = methodInfo.GetParameters();#>
+			<#=writeUnsafe(methodInfo)#><#=writeType(methodInfo.ReturnParameter.ParameterType)#> <#=iName#>.<#=methodInfo.Name#>(<#=String.Join(", ",
+				args.Select(a => String.Format("{0} {1}", writeParamType(a), a.Name)))#>)
+			{
+				<#=writeMethod(methodInfo, String.Format("(({0}){1})", iName, wrappedInstance))#>(<#=String.Join(", ", args.Select(a => writeParamName(a)))#>);
+			}
+		<#}#>
+		#endregion
+		<#}#>
+	}
+
+	public interface I<#=proxyTypeShortName#>
+	{
+		#region Events
+		<#foreach(var eventInfo in eventInfos) {#>
+			event <#=writeType(eventInfo.EventHandlerType)#> <#=eventInfo.Name#>;
+		<#}#>
+		#endregion
+
+		#region Properties
+		<#foreach(var propInfo in propertyInfos) {#>
+		<#var indexers = propInfo.GetIndexParameters();#>
+		<#if (indexers.Length > 0) {#>			
+			<#=writeUnsafe(propInfo)#><#=writeType(propInfo.PropertyType)#> <#=String.Format("this[{0}]", 
+				String.Join(", ", indexers.Select(i => String.Format("{0} {1}", writeType(i.ParameterType), i.Name))))#>
+			<#} else {#>
+			<#=writeUnsafe(propInfo)#><#=writeType(propInfo.PropertyType)#> <#=propInfo.Name#>
+		<#}#>
+			{
+				<#if (propInfo.CanRead) {#>get;<#}#>
+				<#if (propInfo.CanWrite) {#>set;<#}#>
+			}
+		<#}#>
+		#endregion
+
+		#region Methods
+		<#foreach(var methodInfo in methodInfos) {#>
+		<#var args = methodInfo.GetParameters();#>
+			<#=writeUnsafe(methodInfo)#><#=writeType(methodInfo.ReturnParameter.ParameterType)#> <#=methodInfo.Name#>(<#=String.Join(", ", 
+				args.Select(a => String.Format("{0} {1}", writeParamType(a), a.Name)))#>);			
+		<#}#>
+		#endregion
+	}
+
+	public interface I<#=proxyTypeShortName#>Factory
+	{
+		I<#=proxyTypeShortName#> Create(params object[] args);
+	}
+
+	public class <#=proxyTypeShortName#>Factory : I<#=proxyTypeShortName#>Factory
+	{
+		public virtual I<#=proxyTypeShortName#> Create(params object[] args)
+		{
+			return (I<#=proxyTypeShortName#>)System.Activator.CreateInstance(typeof(<#=proxyTypeShortName#>), args);
+		}
+	}
+}

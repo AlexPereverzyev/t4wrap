@@ -52,4 +52,4 @@ Testing
 =======
 
 Template is written and debugged in Visual Studio 2013, tested with 
-``String``, ``SortedDictionary<T,T>`, ``SQLCommand`` and a few other classes.
+``String``, ``SortedDictionary`, ``SQLCommand`` and a few other classes.

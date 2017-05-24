@@ -3,7 +3,7 @@ T4Wrap
 ======
 
 The T4 template provides an easy way to generate C# class proxy, regardless
-whether lazy you just want a proxy to customize behavior or you want some 
+whether you just want a proxy to customize behavior or you want some 
 framework class covered with your custom interface for better unit testing. 
 
 What it does
@@ -46,10 +46,10 @@ Finally, this is the best known way to use the template:
 - Optionally (at your own risk), adjust metadata selectors in *SELECTORS* 
   section of the template.
 - To tweak template, scroll down to the bottom. This is REAL stuff, so don't 
-  ask why it's written that way. 
+  ask why it's written that way :P 
 
 Testing
 =======
 
-Template is written and debugged in Visual Studio 2013, tested with 
-``String``, ``SortedDictionary`, ``SQLCommand`` and a few other classes.
+Template is written and debugged in Visual Studio 2017, tested with 
+``String``, ``SortedDictionary`, ``SQLCommand``, etc.

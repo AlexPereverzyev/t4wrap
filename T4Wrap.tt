@@ -12,7 +12,7 @@
 <#
 /* ----------------------------------- NAMES ----------------------------------- */
 
-var targetType = typeof(System.Data.SqlClient.SqlCommand);
+var targetType = typeof(System.Collections.Generic.Dictionary<string, int>);
 var targetProxyNamespace = (targetType.Namespace + ".Proxies");
 var targetProxySuffix = "Proxy";
 var wrappedInstance = "_inner";
@@ -42,48 +42,14 @@ Func<Type, string> writeArray = null;
 Func<Type, string> writeType = null;
 
 writeGeneric = new Func<Type, string>(t => {
-	var typeRep = String.Empty;
-	var stack = new Stack<Type>(new[]{t});
-	var scopes = new Stack<Type>();	
-	var spans = new Stack<int>();	
-		
-	while (stack.Count > 0)
-	{
-		var cur = stack.Pop();
-
-		if (cur.IsGenericType)
-		{
-			scopes.Push(cur);
-			spans.Push(cur.GenericTypeArguments.Length);
-			cur.GenericTypeArguments.Reverse().ToList().ForEach(x => stack.Push(x));
-
-			typeRep += getCanonicalName(cur) + "<";
-		}
-		else
-		{
-			typeRep += writeType(cur);
-		}		
-
-		while (scopes.Count > 0)
-		{
-			var scope = scopes.Pop();
-			var span = spans.Pop();
-
-			if (span-- == 0)
-			{
-				typeRep += ">";
-			}
-			else
-			{
-				scopes.Push(scope);
-				spans.Push(span);
-
-				typeRep += (span < scope.GenericTypeArguments.Length - 1 ? ", " : String.Empty);
-				break;
-			}
-		}
-	}		
-	return typeRep; 
+    var typeRep = getCanonicalName(t) + "<";                
+    for (var i = 0; i < t.GenericTypeArguments.Length; i++)
+    {
+        typeRep += writeType(t.GenericTypeArguments[i]);
+        typeRep += i < t.GenericTypeArguments.Length - 1 ? ", " : String.Empty;
+    }
+    typeRep += ">";
+    return typeRep;
 });
 
 writeArray = new Func<Type, string>(t => {
